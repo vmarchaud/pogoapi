@@ -1,0 +1,67 @@
+group = 'org.pogoapi'
+version = '0.0.1'
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.7.7'
+    }
+}
+
+apply plugin: 'idea'
+apply plugin: 'java'
+apply plugin: 'maven'
+apply plugin: 'com.google.protobuf'
+
+description = "A lightest API in Java for interacting with PokemonGo's servers"
+
+sourceCompatibility = 1.7
+targetCompatibility = 1.7
+
+repositories {
+    mavenCentral()
+    maven { url "https://jitpack.io" }
+    maven { url 'https://oss.jfrog.org/libs-snapshot' }
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir 'src/resources/protobuf/src'
+            include '**/*.proto'
+        }
+    }
+}
+
+processResources {
+    exclude('**/*')
+}
+
+task bundle(type: Jar) {
+    from {
+        configurations.compile.collect {
+            it.isDirectory() && !it.isEmpty() ? it : zipTree(it)
+        }
+    }
+    with jar
+}
+
+jar.finalizedBy(bundle)
+
+protobuf {
+    // Configure the protoc executable
+    protoc {
+        // Download from repositories
+        artifact = 'com.google.protobuf:protoc:3.0.0-beta-3'
+    }
+}
+
+dependencies {
+    compile 'com.github.svarzee:gpsoauth-java:v0.3.0'
+    compile 'io.reactivex.rxjava2:rxjava:2.0.0-DP0-SNAPSHOT'
+    compile 'com.squareup.retrofit2:retrofit:2.1.0'
+    compile 'com.google.protobuf:protobuf-java:3.0.0-beta-3'
+    compileOnly 'org.projectlombok:lombok:1.16.6'
+}
