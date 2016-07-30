@@ -39,6 +39,12 @@ public class NetworkRequest {
 	@Getter 
 	private ICallback	callback;
 	
+	/**
+	 * Build a network request
+	 * @param type : official RequestType from protos
+	 * @param message : the message that has been build
+	 * @param callback : the callback that will be call when we receive the response
+	 */
 	public NetworkRequest(RequestType type, GeneratedMessage message, ICallback callback) {
 		Request.Builder requestBuilder = Request.newBuilder();
 		requestBuilder.setRequestMessage(message.toByteString());

@@ -30,7 +30,6 @@ public interface ITokenProvider {
 	
 	/**
 	 * Ask to the token provider to get a constructed AuthInfo
-	 * 
 	 * @return AuthInfo containing token needed to access servers
 	 */
 	public AuthInfo		getAuthInfo();

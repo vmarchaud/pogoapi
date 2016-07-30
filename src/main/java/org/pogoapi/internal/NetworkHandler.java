@@ -67,9 +67,9 @@ public class NetworkHandler implements Runnable {
 	/**
 	 * Construct the Network handler, this runnable will be started into a new thread to send async request.
 	 * 
-	 * @param ITokenProvider : the interface used to provide access_token 
-	 * @param OkHttpClient : the http client that will be used to make http call
-	 * @param AtomicReference<Location>: the location that will be accessed when trying to send client position
+	 * @param tokenProvider : the interface used to provide access_token 
+	 * @param httpClient : the http client that will be used to make http call
+	 * @param location : the location that will be accessed when trying to send client position
 	 */
 	public NetworkHandler(ITokenProvider tokenProvider, OkHttpClient httpClient, AtomicReference<Location> location) {
 		this.tokenProvider = tokenProvider;
@@ -107,7 +107,7 @@ public class NetworkHandler implements Runnable {
 			builder.setRequestId(getRequestId());
 			builder.setUnknown12(protocolVersion); 
 			
-			// handle auth
+			// handle sending AuthInfo or AuthTicket
 			handleAuth(builder);
 			
 			// get the latest location reference to use for our network call
@@ -169,6 +169,7 @@ public class NetworkHandler implements Runnable {
 			// reset internal var
 			retry = false;
 			last = System.currentTimeMillis();
+			requests.clear();
 		}
 	}
 	
@@ -185,7 +186,7 @@ public class NetworkHandler implements Runnable {
 	
 	/**
 	 * This function will pool a number of request from the queue
-	 * @param Integer : the maximum number of request that we will pull
+	 * @param max : the maximum number of request that we will pull
 	 * @return List<NetworkRequest>
 	 */
 	private List<NetworkRequest> pollRequests(int max) {

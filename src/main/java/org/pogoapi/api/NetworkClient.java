@@ -32,7 +32,7 @@ import org.pogoapi.internal.NetworkHandler;
 
 import okhttp3.OkHttpClient;
 
-public class Client {
+public class NetworkClient {
 	
 	private NetworkHandler				network;
 	private AtomicReference<Location>	location;
@@ -40,10 +40,10 @@ public class Client {
 	/**
 	 * Constructor the client that will be used to make network cal
 	 * 
-	 * @param ITokenProvider : the interface used to provide access_token 
-	 * @param OkHttpClient : the http client that will be used to make http call
+	 * @param tokenProvider : the interface used to provide access_token 
+	 * @param httpClient : the http client that will be used to make http call
 	 */
-	public Client(OkHttpClient httpClient, ITokenProvider tokenProvider) {
+	public NetworkClient(OkHttpClient httpClient, ITokenProvider tokenProvider) {
 		location = new AtomicReference<Location>();
 		network = new NetworkHandler(tokenProvider, httpClient, location);
 		new Thread(network).start();
@@ -51,7 +51,7 @@ public class Client {
 	
 	/**
 	 * Ask the NetworkHandler to send a request
-	 * @param NetworkRequest : the request that will be send (with the defined callback)
+	 * @param request : the request that will be send (with the defined callback)
 	 * @return boolean : if the request has been put in queue or not
 	 */
 	public boolean offerRequest(NetworkRequest request) {
@@ -60,7 +60,7 @@ public class Client {
 	
 	/**
 	 * This method is used to atomicly update the position of the client
-	 * @param Location : the new location
+	 * @param newLoc : the new location
 	 */
 	public void updateLocation(Location newLoc) {
 		location.set(newLoc);
