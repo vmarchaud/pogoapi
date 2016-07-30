@@ -22,16 +22,33 @@
  * SOFTWARE.
  *******************************************************************************/
 
-package org.pogoapi.api.auth;
+package org.pogoapi.api;
 
-import POGOProtos.Networking.Envelopes.RequestEnvelopeOuterClass.RequestEnvelope.AuthInfo;
+import org.pogoapi.api.objects.NetworkResult;
 
-public interface ITokenProvider {
+import com.google.protobuf.GeneratedMessage;
+
+import POGOProtos.Networking.Requests.RequestOuterClass.Request;
+import POGOProtos.Networking.Requests.RequestTypeOuterClass.RequestType;
+import lombok.Getter;
+
+public class NetworkRequest {
 	
-	/**
-	 * Ask to the token provider to get a constructed AuthInfo
-	 * 
-	 * @return AuthInfo containing token needed to access servers
-	 */
-	public AuthInfo		getAuthInfo();
+	@Getter 
+	private Request		request;
+	@Getter 
+	private ICallback	callback;
+	
+	public NetworkRequest(RequestType type, GeneratedMessage message, ICallback callback) {
+		Request.Builder requestBuilder = Request.newBuilder();
+		requestBuilder.setRequestMessage(message.toByteString());
+		requestBuilder.setRequestType(type);
+		
+		this.request = requestBuilder.build();
+		this.callback = callback;
+	}
+	
+	public interface ICallback {
+		void callback(NetworkResult result, byte[] response);
+	}
 }

@@ -22,16 +22,14 @@
  * SOFTWARE.
  *******************************************************************************/
 
-package org.pogoapi.api.auth;
+package org.pogoapi.api.objects;
 
-import POGOProtos.Networking.Envelopes.RequestEnvelopeOuterClass.RequestEnvelope.AuthInfo;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 
-public interface ITokenProvider {
+@Data @AllArgsConstructor
+public class NetworkResult {
 	
-	/**
-	 * Ask to the token provider to get a constructed AuthInfo
-	 * 
-	 * @return AuthInfo containing token needed to access servers
-	 */
-	public AuthInfo		getAuthInfo();
+	private boolean		success;
+	private Exception	exception;
 }

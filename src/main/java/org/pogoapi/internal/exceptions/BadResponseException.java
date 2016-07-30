@@ -22,16 +22,21 @@
  * SOFTWARE.
  *******************************************************************************/
 
-package org.pogoapi.api.auth;
+package org.pogoapi.internal.exceptions;
 
-import POGOProtos.Networking.Envelopes.RequestEnvelopeOuterClass.RequestEnvelope.AuthInfo;
+public class BadResponseException extends Exception {
 
-public interface ITokenProvider {
-	
-	/**
-	 * Ask to the token provider to get a constructed AuthInfo
-	 * 
-	 * @return AuthInfo containing token needed to access servers
-	 */
-	public AuthInfo		getAuthInfo();
+	private static final long serialVersionUID = 1L;
+
+	public BadResponseException() {
+		super();
+	}
+
+	public BadResponseException(String reason) {
+		super(reason);
+	}
+
+	public BadResponseException(Exception exception) {
+		super(exception);
+	}
 }
