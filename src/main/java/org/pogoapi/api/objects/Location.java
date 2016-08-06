@@ -29,6 +29,9 @@ import lombok.Data;
 @Data
 public class Location {
 	
+	
+	public Location() { }
+	
 	private double latitude = 0.0D;
 	private double longitude = 0.0D;
 	private double altitude = 0.0D;

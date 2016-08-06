@@ -37,10 +37,19 @@ import org.pogoapi.api.objects.Location;
 import org.pogoapi.api.objects.NetworkResult;
 import org.pogoapi.internal.exceptions.BadResponseException;
 
+import com.google.protobuf.ByteString;
+
 import POGOProtos.Networking.Envelopes.AuthTicketOuterClass.AuthTicket;
 import POGOProtos.Networking.Envelopes.RequestEnvelopeOuterClass.RequestEnvelope;
 import POGOProtos.Networking.Envelopes.ResponseEnvelopeOuterClass.ResponseEnvelope;
+import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature;
+import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.DeviceInfo;
+import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.LocationFix;
+import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.iOSActivityStatus;
 import lombok.Getter;
+import net.jpountz.xxhash.XXHash32;
+import net.jpountz.xxhash.XXHash64;
+import net.jpountz.xxhash.XXHashFactory;
 import okhttp3.OkHttpClient;
 import okhttp3.RequestBody;
 import okhttp3.Response;
@@ -63,6 +72,10 @@ public class NetworkHandler implements Runnable {
 	private List<NetworkRequest>					requests;
 	private boolean									retry;
 	private Long									last;
+	private Long									start;
+	private Random									random;
+	private byte[]									unk22;
+	private XXHashFactory 							factory;
 	
 	/**
 	 * Construct the Network handler, this runnable will be started into a new thread to send async request.
@@ -78,10 +91,15 @@ public class NetworkHandler implements Runnable {
 		
 		queue = new ConcurrentLinkedQueue<NetworkRequest>();
 		last = System.currentTimeMillis();
+		start = System.currentTimeMillis();
 		endpoint = "https://pgorelease.nianticlabs.com/plfe/rpc";
-		requestId = new Random().nextLong();
-		protocolVersion = new Random().nextInt(1000) + 1;
+		random = new Random();
+		requestId = random.nextLong();
+		protocolVersion = random.nextInt(1000) + 1;
+		unk22 = new byte[16];
+		random.nextBytes(unk22);
 		retry = false;
+		factory = XXHashFactory.fastestInstance();
 	}
 	
 	@Override
@@ -122,6 +140,10 @@ public class NetworkHandler implements Runnable {
 			for(NetworkRequest nrequest : requests) {
 				builder.addRequests(nrequest.getRequest());
 			}
+			
+			// add signature data
+			if (ticket != null)
+				builder.setSignature(buildSignature(currentLoc, requests, ticket));
 			
 			// build the final http request
 			RequestEnvelope reqEnvelope = builder.build();
@@ -178,8 +200,10 @@ public class NetworkHandler implements Runnable {
 	 * @param RequestEnvelope.Builder : envelope builder to set AuthInfo / AuthTicket
 	 */
 	private void handleAuth(RequestEnvelope.Builder builder) {
-		if (ticket == null || ticket.getExpireTimestampMs() < System.currentTimeMillis())
+		if (ticket == null || ticket.getExpireTimestampMs() < System.currentTimeMillis()) {
+			ticket = null;
 			builder.setAuthInfo(tokenProvider.getAuthInfo());
+		}
 		else
 			builder.setAuthTicket(ticket);
 	}
@@ -207,9 +231,61 @@ public class NetworkHandler implements Runnable {
 	 * This function is used to increment and get a request id
 	 * This is not really needed today since Niantic doesnt check it 
 	 * but if one day it will.
+	 * 
 	 * @return Long : a request id
 	 */
 	private Long getRequestId() {
 		return ++requestId;
+	}
+	
+	/**
+	 * Build Signature message
+	 * @param loc : the location of the client
+	 * @param requests : all requests that will be send to compute their hash
+	 * @param ticket : the current AuthTicket to compute his hash too
+	 * 
+	 * @return Signature Message
+	 */
+	private Signature buildSignature(Location loc, List<NetworkRequest> requests, AuthTicket ticket) {
+		LocationFix.Builder locfix = LocationFix.newBuilder();
+		if (loc != null)
+			locfix.setAltitude((float)loc.getAltitude()).setLatitude((float)loc.getLatitude()).setLongitude((float)loc.getLongitude());
+		locfix.setTimestampSinceStart(System.currentTimeMillis() - start)
+				.setHorizontalAccuracy((random.nextFloat() * 2) - 1)
+				.setProvider("gps")
+				.setProviderStatus(3)
+				.setLocationType(1)
+				.build();
+		iOSActivityStatus activity = iOSActivityStatus.newBuilder()
+				.setStartTimeMs(System.currentTimeMillis() - start)
+				.setAutomotive(true)
+				.build();
+		DeviceInfo device = DeviceInfo.newBuilder()
+				.setFirmwareBrand("iPhone OS")
+				.setFirmwareType("9.0.0")
+				.setHardwareManufacturer("Apple")
+				.setDeviceId("good game niantic, love playing it")
+				.build();
+		
+		XXHash32 hash32 = factory.hash32();
+		XXHash64 hash64 = factory.hash64();
+		List<Long>	hashs = new ArrayList<Long>();
+		
+		Long seed = hash64.hash(ticket.toByteString().asReadOnlyByteBuffer(), 0x1B845238);
+		for(NetworkRequest request : requests)
+			hashs.add(hash64.hash(request.getRequest().toByteString().asReadOnlyByteBuffer(), seed));
+		
+		int authHash = Integer.reverseBytes(hash32.hash(ticket.toByteString().asReadOnlyByteBuffer(), 0x1B845238));
+		
+		return Signature.newBuilder()
+				.setActivityStatus(activity)
+				.setDeviceInfo(device)
+				.addLocationFix(locfix.build())
+				.setTimestamp(System.currentTimeMillis())
+				.setTimestampSinceStart(System.currentTimeMillis() - start)
+				.setUnk22(ByteString.copyFrom(unk22))
+				.addAllRequestHash(hashs)
+				.setLocationHash1(authHash)
+				.build();
 	}
 }
