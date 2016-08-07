@@ -25,9 +25,7 @@
 package org.pogoapi.internal;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -38,28 +36,17 @@ import org.pogoapi.api.objects.Location;
 import org.pogoapi.api.objects.NetworkRequest;
 import org.pogoapi.api.objects.NetworkResult;
 import org.pogoapi.internal.exceptions.BadResponseException;
-import org.pogoapi.internal.utils.ArrayUtils;
-import org.pogoapi.internal.utils.NativeUtils.EncryptLib;
-import org.pogoapi.internal.utils.SizeT;
+import org.pogoapi.internal.utils.SignatureUtils;
+import org.pogoapi.internal.utils.SignatureUtils.Ciptext;
 
 import com.google.protobuf.ByteString;
-import com.sun.jna.Pointer;
-import com.sun.jna.WString;
-
 import POGOProtos.Networking.Envelopes.AuthTicketOuterClass.AuthTicket;
 import POGOProtos.Networking.Envelopes.RequestEnvelopeOuterClass.RequestEnvelope;
 import POGOProtos.Networking.Envelopes.ResponseEnvelopeOuterClass.ResponseEnvelope;
-import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature;
-import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.DeviceInfo;
-import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.LocationFix;
-import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.SensorInfo;
-import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.iOSActivityStatus;
 import POGOProtos.Networking.Envelopes.Unknown6OuterClass.Unknown6;
 import POGOProtos.Networking.Envelopes.Unknown6OuterClass.Unknown6.Unknown2;
+import POGOProtos.Networking.Signature.SignatureOuterClass.Signature;
 import lombok.Getter;
-import net.jpountz.xxhash.XXHash32;
-import net.jpountz.xxhash.XXHash64;
-import net.jpountz.xxhash.XXHashFactory;
 import okhttp3.OkHttpClient;
 import okhttp3.RequestBody;
 import okhttp3.Response;
@@ -85,7 +72,6 @@ public class NetworkHandler implements Runnable {
 	private Long									start;
 	private Random									random;
 	private byte[]									unk22;
-	private XXHashFactory 							factory;
 	
 	/**
 	 * Construct the Network handler, this runnable will be started into a new thread to send async request.
@@ -109,7 +95,6 @@ public class NetworkHandler implements Runnable {
 		unk22 = new byte[16];
 		random.nextBytes(unk22);
 		retry = false;
-		factory = XXHashFactory.fastestInstance();
 	}
 	
 	@Override
@@ -153,21 +138,15 @@ public class NetworkHandler implements Runnable {
 			
 			// add signature data
 			if (ticket != null) {
-				WString input = new WString(buildSignature(currentLoc, requests, ticket).toString());
-				Pointer output_size = Pointer.NULL;
-				byte[] ivbytes = new byte[32];
-				random.nextBytes(ivbytes);
-				WString iv = new WString(ivbytes.toString());
+				Signature sign = buildSignature(currentLoc, requests, ticket);
+				byte[] iv = new byte[32];
+				random.nextBytes(iv);
+				Ciptext ciptext = SignatureUtils.encrypt(sign.toByteArray(), iv);
+				ByteString data = ByteString.copyFrom(ciptext.toByteBuffer().array());
 				
-				// TODO this shouldnt work
-				WString output = new WString("");
-				
-				EncryptLib.INSTANCE.encrypt(input, new SizeT(input.length()), iv, new SizeT(32), output, output_size);
-				ByteString result = ByteString.EMPTY;
-				
-				builder.setUnknown6(Unknown6.newBuilder().setRequestType(6).setUnknown2(Unknown2.newBuilder().setUnknown1(result)));
+				builder.addUnknown6(Unknown6.newBuilder().setRequestType(6)
+						.setUnknown2(Unknown2.newBuilder().setEncryptedSignature(data).build()).build());
 			}
-				
 			
 			// build the final http request
 			RequestEnvelope reqEnvelope = builder.build();
@@ -187,13 +166,13 @@ public class NetworkHandler implements Runnable {
 				// statusCode 53 is that we need to switch servers
 				if (resEnvelope.getStatusCode() == 53) {
 					endpoint = "https://" + resEnvelope.getApiUrl() + "/rpc";
+					ticket = resEnvelope.getAuthTicket();
 					retry = true;
 					continue ;
 				}
 				
 				// update our auth ticket if the response contain one
-				if (resEnvelope.hasAuthTicket())
-					ticket = resEnvelope.getAuthTicket();
+				ticket = resEnvelope.getAuthTicket();
 				
 				// handle callback
 				for (short i = 0; i < resEnvelope.getReturnsList().size(); i++) {
@@ -271,78 +250,25 @@ public class NetworkHandler implements Runnable {
 	 * @return Signature Message
 	 */
 	private Signature buildSignature(Location loc, List<NetworkRequest> requests, AuthTicket ticket) {
-		// put location data if we have it
-		LocationFix.Builder locfix = LocationFix.newBuilder();
-		if (loc != null) {
-			locfix.setAltitude((float)loc.getAltitude())
-				.setLatitude((float)loc.getLatitude())
-				.setLongitude((float)loc.getLongitude())
-				.setTimestampSinceStart(System.currentTimeMillis() - start)
-				.setHorizontalAccuracy((random.nextFloat() * 2) - 1)
-				.setProvider("gps")
-				.setProviderStatus(3)
-				.setLocationType(1)
-				.build();
-		}
-		
-		SensorInfo sensor = SensorInfo.newBuilder()
-				.setAccelerometerAxes(3)
-				.setAccelNormalizedX(random.nextLong())
-				.setAccelNormalizedY(random.nextLong())
-				.setAccelNormalizedZ(random.nextLong())
-				.setAccelRawX(random.nextLong())
-				.setAccelRawY(random.nextLong())
-				.setAccelRawZ(random.nextLong())
-				.setAngleNormalizedX(random.nextDouble())
-				.setAngleNormalizedY(random.nextDouble())
-				.setAngleNormalizedZ(random.nextDouble())
-				.setTimestampSnapshot(System.currentTimeMillis() - start)
-				.build();
-		
-		// put random data that look likes an iPhone
-		DeviceInfo device = DeviceInfo.newBuilder()
-				.setFirmwareBrand("iPhone OS")
-				.setDeviceId("DD52EC54C31F0BFA4B86C786640BFA4B86C78664")
-				.setFirmwareType("9.3.3")
-				.setHardwareManufacturer("Apple")
-				.build();
-		
-		XXHash32 hash32 = factory.hash32();
-		XXHash64 hash64 = factory.hash64();
 		List<Long>	hashs = new ArrayList<Long>();
-		
-		// compute 64 bits ticket hash to use as seed
-		Long seed = hash64.hash(ticket.toByteString().asReadOnlyByteBuffer(), 0x1B845238);
 		
 		// compute all hashs request
 		for(NetworkRequest request : requests)
-			hashs.add(hash64.hash(request.getRequest().toByteString().asReadOnlyByteBuffer(), seed));
+			hashs.add(SignatureUtils.getRequestHash(ticket.toByteArray(), request.getRequest().toByteArray()));
 		
-		// compute 32 bits ticket hash to use as seed
-		int intSeed = hash32.hash(ticket.toByteString().asReadOnlyByteBuffer(), 0x1B845238);
-		
-		
-		// compute the bytes of the location
-		// TODO might not work too
-		ByteBuffer locbytes = ByteBuffer.wrap(ArrayUtils.concat(ArrayUtils.toByteArray(loc.getLatitude()), 
-				ArrayUtils.toByteArray(loc.getLongitude()),  ArrayUtils.toByteArray(loc.getAltitude())));
 		// compute both hash
-		int lochash1 = Integer.reverseBytes(hash32.hash(locbytes, intSeed));
-		int locHash2 = Integer.reverseBytes(hash32.hash(locbytes, 0x1B845238));
+		int lochash1 = SignatureUtils.getLocationHash1(ticket.toByteArray(), loc);
+		int locHash2 = SignatureUtils.getLocationHash2(loc);
 		
 		// finaly build the signature
 		return Signature.newBuilder()
-				.setDeviceInfo(device)
-				.addLocationFix(locfix.build())
 				.setTimestamp(System.currentTimeMillis())
 				.setTimestampSinceStart(System.currentTimeMillis() - start)
 				.setUnk22(ByteString.copyFrom(unk22))
 				.addAllRequestHash(hashs)
 				.setLocationHash1(lochash1)
 				.setLocationHash2(locHash2)
-				.setTimestamp(System.currentTimeMillis())
 				.build();
 	}
-	
 	
 }
