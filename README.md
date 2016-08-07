@@ -22,7 +22,7 @@ This API doesnt fake the official client perfectly, niantic may know that you ar
   - Clone the repo and cd into the folder
   - `` git submodule update --init ``
   - `` ./gradlew build ``
-  - you should have the api jar in ``build/libs/pogoapi-0.1.0.jar``
+  - you should have the api jar in ``build/libs/pogoapi-X.Y.Z.jar``
 
 PS : If you want to import the API's source into your IDE, you will need to import the generated protobuf java class into the classpath of your IDE, for example using eclipse :
   - build once : `` ./gradlew build ``
