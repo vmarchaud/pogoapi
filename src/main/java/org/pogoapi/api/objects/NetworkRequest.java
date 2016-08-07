@@ -22,9 +22,7 @@
  * SOFTWARE.
  *******************************************************************************/
 
-package org.pogoapi.api;
-
-import org.pogoapi.api.objects.NetworkResult;
+package org.pogoapi.api.objects;
 
 import com.google.protobuf.GeneratedMessage;
 

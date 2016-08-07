@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.pogoapi.api.auth.ITokenProvider;
 import org.pogoapi.api.objects.Location;
+import org.pogoapi.api.objects.NetworkRequest;
 import org.pogoapi.internal.NetworkHandler;
 
 import okhttp3.OkHttpClient;

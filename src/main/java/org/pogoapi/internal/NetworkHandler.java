@@ -25,19 +25,26 @@
 package org.pogoapi.internal;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.pogoapi.api.NetworkRequest;
 import org.pogoapi.api.auth.ITokenProvider;
 import org.pogoapi.api.objects.Location;
+import org.pogoapi.api.objects.NetworkRequest;
 import org.pogoapi.api.objects.NetworkResult;
 import org.pogoapi.internal.exceptions.BadResponseException;
+import org.pogoapi.internal.utils.ArrayUtils;
+import org.pogoapi.internal.utils.NativeUtils.EncryptLib;
+import org.pogoapi.internal.utils.SizeT;
 
 import com.google.protobuf.ByteString;
+import com.sun.jna.Pointer;
+import com.sun.jna.WString;
 
 import POGOProtos.Networking.Envelopes.AuthTicketOuterClass.AuthTicket;
 import POGOProtos.Networking.Envelopes.RequestEnvelopeOuterClass.RequestEnvelope;
@@ -45,7 +52,10 @@ import POGOProtos.Networking.Envelopes.ResponseEnvelopeOuterClass.ResponseEnvelo
 import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature;
 import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.DeviceInfo;
 import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.LocationFix;
+import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.SensorInfo;
 import POGOProtos.Networking.Envelopes.SignatureOuterClass.Signature.iOSActivityStatus;
+import POGOProtos.Networking.Envelopes.Unknown6OuterClass.Unknown6;
+import POGOProtos.Networking.Envelopes.Unknown6OuterClass.Unknown6.Unknown2;
 import lombok.Getter;
 import net.jpountz.xxhash.XXHash32;
 import net.jpountz.xxhash.XXHash64;
@@ -142,8 +152,22 @@ public class NetworkHandler implements Runnable {
 			}
 			
 			// add signature data
-			if (ticket != null)
-				builder.setSignature(buildSignature(currentLoc, requests, ticket));
+			if (ticket != null) {
+				WString input = new WString(buildSignature(currentLoc, requests, ticket).toString());
+				Pointer output_size = Pointer.NULL;
+				byte[] ivbytes = new byte[32];
+				random.nextBytes(ivbytes);
+				WString iv = new WString(ivbytes.toString());
+				
+				// TODO this shouldnt work
+				WString output = new WString("");
+				
+				EncryptLib.INSTANCE.encrypt(input, new SizeT(input.length()), iv, new SizeT(32), output, output_size);
+				ByteString result = ByteString.EMPTY;
+				
+				builder.setUnknown6(Unknown6.newBuilder().setRequestType(6).setUnknown2(Unknown2.newBuilder().setUnknown1(result)));
+			}
+				
 			
 			// build the final http request
 			RequestEnvelope reqEnvelope = builder.build();
@@ -247,45 +271,78 @@ public class NetworkHandler implements Runnable {
 	 * @return Signature Message
 	 */
 	private Signature buildSignature(Location loc, List<NetworkRequest> requests, AuthTicket ticket) {
+		// put location data if we have it
 		LocationFix.Builder locfix = LocationFix.newBuilder();
-		if (loc != null)
-			locfix.setAltitude((float)loc.getAltitude()).setLatitude((float)loc.getLatitude()).setLongitude((float)loc.getLongitude());
-		locfix.setTimestampSinceStart(System.currentTimeMillis() - start)
+		if (loc != null) {
+			locfix.setAltitude((float)loc.getAltitude())
+				.setLatitude((float)loc.getLatitude())
+				.setLongitude((float)loc.getLongitude())
+				.setTimestampSinceStart(System.currentTimeMillis() - start)
 				.setHorizontalAccuracy((random.nextFloat() * 2) - 1)
 				.setProvider("gps")
 				.setProviderStatus(3)
 				.setLocationType(1)
 				.build();
-		iOSActivityStatus activity = iOSActivityStatus.newBuilder()
-				.setStartTimeMs(System.currentTimeMillis() - start)
-				.setAutomotive(true)
+		}
+		
+		SensorInfo sensor = SensorInfo.newBuilder()
+				.setAccelerometerAxes(3)
+				.setAccelNormalizedX(random.nextLong())
+				.setAccelNormalizedY(random.nextLong())
+				.setAccelNormalizedZ(random.nextLong())
+				.setAccelRawX(random.nextLong())
+				.setAccelRawY(random.nextLong())
+				.setAccelRawZ(random.nextLong())
+				.setAngleNormalizedX(random.nextDouble())
+				.setAngleNormalizedY(random.nextDouble())
+				.setAngleNormalizedZ(random.nextDouble())
+				.setTimestampSnapshot(System.currentTimeMillis() - start)
 				.build();
+		
+		// put random data that look likes an iPhone
 		DeviceInfo device = DeviceInfo.newBuilder()
 				.setFirmwareBrand("iPhone OS")
-				.setFirmwareType("9.0.0")
+				.setDeviceId("DD52EC54C31F0BFA4B86C786640BFA4B86C78664")
+				.setFirmwareType("9.3.3")
 				.setHardwareManufacturer("Apple")
-				.setDeviceId("good game niantic, love playing it")
 				.build();
 		
 		XXHash32 hash32 = factory.hash32();
 		XXHash64 hash64 = factory.hash64();
 		List<Long>	hashs = new ArrayList<Long>();
 		
+		// compute 64 bits ticket hash to use as seed
 		Long seed = hash64.hash(ticket.toByteString().asReadOnlyByteBuffer(), 0x1B845238);
+		
+		// compute all hashs request
 		for(NetworkRequest request : requests)
 			hashs.add(hash64.hash(request.getRequest().toByteString().asReadOnlyByteBuffer(), seed));
 		
-		int authHash = Integer.reverseBytes(hash32.hash(ticket.toByteString().asReadOnlyByteBuffer(), 0x1B845238));
+		// compute 32 bits ticket hash to use as seed
+		int intSeed = hash32.hash(ticket.toByteString().asReadOnlyByteBuffer(), 0x1B845238);
 		
+		
+		// compute the bytes of the location
+		// TODO might not work too
+		ByteBuffer locbytes = ByteBuffer.wrap(ArrayUtils.concat(ArrayUtils.toByteArray(loc.getLatitude()), 
+				ArrayUtils.toByteArray(loc.getLongitude()),  ArrayUtils.toByteArray(loc.getAltitude())));
+		// compute both hash
+		int lochash1 = Integer.reverseBytes(hash32.hash(locbytes, intSeed));
+		int locHash2 = Integer.reverseBytes(hash32.hash(locbytes, 0x1B845238));
+		
+		// finaly build the signature
 		return Signature.newBuilder()
-				.setActivityStatus(activity)
 				.setDeviceInfo(device)
 				.addLocationFix(locfix.build())
 				.setTimestamp(System.currentTimeMillis())
 				.setTimestampSinceStart(System.currentTimeMillis() - start)
 				.setUnk22(ByteString.copyFrom(unk22))
 				.addAllRequestHash(hashs)
-				.setLocationHash1(authHash)
+				.setLocationHash1(lochash1)
+				.setLocationHash2(locHash2)
+				.setTimestamp(System.currentTimeMillis())
 				.build();
 	}
+	
+	
 }
